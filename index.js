@@ -11,8 +11,10 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 
 // Middleware
-app.use(cors());
-app.use(bodyParser.json({ limit: '10mb' }));
+app.use(cors({
+  origin: 'https://kedarling-yatri-niwas-frontend-r5rw.vercel.app', // your frontend URL
+  credentials: true // if using cookies or auth headers
+}));app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
