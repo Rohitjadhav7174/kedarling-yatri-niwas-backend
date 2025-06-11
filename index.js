@@ -11,7 +11,6 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 
 // Middleware
-const cors = require("cors");
 
 app.use(cors({
   origin: "https://kedarling-yatri-niwas-frontend.vercel.app", // or "*" during development
