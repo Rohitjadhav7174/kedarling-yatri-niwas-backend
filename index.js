@@ -5,13 +5,16 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
 const multer = require('multer');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 5001;
 
 // Middleware
 app.use(cors());
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Verify essential environment variables
 const requiredEnvVars = [
@@ -21,7 +24,10 @@ const requiredEnvVars = [
   'SMTP_USER',
   'SMTP_PASS',
   'ADMIN_EMAIL',
-  'FROM_EMAIL'
+  'FROM_EMAIL',
+  'HOTEL_NAME',
+  'HOTEL_PHONE',
+  'HOTEL_ADDRESS'
 ];
 
 for (const envVar of requiredEnvVars) {
@@ -49,33 +55,48 @@ mongoose.connect(process.env.MONGODB_URI, {
 
 const db = mongoose.connection;
 
-// Email transporter setup
+// Email transporter configuration
 const emailTransporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT,
-  secure: process.env.SMTP_PORT === 465, // true for 465, false for other ports
+  port: Number(process.env.SMTP_PORT),
+  secure: process.env.SMTP_SECURE === 'true',
   auth: {
     user: process.env.SMTP_USER,
     pass: process.env.SMTP_PASS,
   },
-    tls: {
-    rejectUnauthorized: false // Only for testing with self-signed certs
+  tls: {
+    rejectUnauthorized: false,
   },
-  connectionTimeout: 10000, // 10 seconds
-  greetingTimeout: 10000    // 10 seconds
+  logger: true,
+  debug: true
 });
 
-// Verify email connection
-emailTransporter.verify((error) => {
-  if (error) {
-    console.error('Error connecting to email server:', error);
-  } else {
-    console.log('Email server connection verified');
+// Verify email connection on startup
+async function verifyEmailConnection() {
+  try {
+    console.log('Verifying SMTP connection...');
+    await emailTransporter.verify();
+    console.log('SMTP Server is ready to take our messages');
+    return true;
+  } catch (error) {
+    console.error('SMTP Connection verification failed:', error);
+    return false;
+  }
+}
+
+verifyEmailConnection();
+
+// Multer setup for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'public/uploads/');
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}-${file.originalname}`);
   }
 });
 
-// Multer setup for file uploads
-const upload = multer();
+const upload = multer({ storage });
 
 // Room Schema
 const roomSchema = new mongoose.Schema({
@@ -83,6 +104,8 @@ const roomSchema = new mongoose.Schema({
   roomNumber: { type: String, required: true, unique: true },
   isAvailable: { type: Boolean, default: true },
   price: { type: Number, required: true },
+  capacity: { type: Number, required: true },
+  amenities: { type: [String], default: [] }
 }, { timestamps: true });
 
 const Room = mongoose.model('Room', roomSchema);
@@ -104,21 +127,231 @@ const bookingSchema = new mongoose.Schema({
   totalAmount: { type: Number, required: true },
   paymentStatus: { type: String, enum: ['Pending', 'Completed'], default: 'Pending' },
   paymentMethod: { type: String, enum: ['online', 'cash'], default: 'online' },
-  paymentProof: {
-    data: Buffer,
-    contentType: String
-  },
+  paymentProof: { type: String },
   specialRequests: { type: String },
   bookingDate: { type: Date, default: Date.now },
+  bookingStatus: { type: String, enum: ['Confirmed', 'Cancelled', 'Completed'], default: 'Confirmed' }
 }, { timestamps: true });
 
 const Booking = mongoose.model('Booking', bookingSchema);
 
-// Admin credentials
-const ADMIN_CREDENTIALS = {
-  username: process.env.ADMIN_USERNAME || 'admin',
-  password: process.env.ADMIN_PASSWORD || 'admin123'
-};
+// Function to send booking confirmation emails
+async function sendBookingEmails(booking) {
+  try {
+    // Format dates
+    const formatDate = (date) => date.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+
+    const formatTime = (time) => time.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+
+    // Calculate nights
+    const nights = Math.ceil((booking.checkOutDate - booking.checkInDate) / (1000 * 60 * 60 * 24));
+
+    // Prepare room details
+    const roomDetails = booking.selectedRooms.map(room => 
+      `<tr>
+        <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">Room ${room.roomNumber}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">₹${room.price}/night</td>
+      </tr>`
+    ).join('');
+
+    // Customer email
+    if (booking.customerEmail) {
+      const customerMail = {
+        from: `"${process.env.HOTEL_NAME}" <${process.env.FROM_EMAIL}>`,
+        to: booking.customerEmail,
+        subject: `Booking Confirmation #${booking._id.toString().slice(-6)} - ${process.env.HOTEL_NAME}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+            <div style="background-color: #4a6baf; color: white; padding: 20px; text-align: center;">
+              <h1 style="margin: 0; font-size: 24px;">Booking Confirmed!</h1>
+              <p style="margin: 5px 0 0; font-size: 16px;">${process.env.HOTEL_NAME}</p>
+            </div>
+            
+            <div style="padding: 20px; background-color: #f9f9f9;">
+              <h2 style="color: #4a6baf; margin-top: 0;">Booking Details</h2>
+              <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0; width: 40%;"><strong>Booking ID:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking._id.toString().slice(-6)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Guest Name:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.customerName}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Check-in:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${formatDate(booking.checkInDate)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Check-out:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${formatDate(booking.checkOutDate)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Total Nights:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${nights}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Total Amount:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">₹${booking.totalAmount}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px;"><strong>Status:</strong></td>
+                  <td style="padding: 8px;">Confirmed</td>
+                </tr>
+              </table>
+              
+              <h3 style="color: #4a6baf; margin-top: 20px;">Room Details</h3>
+              <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 5px; padding: 15px;">
+                <table style="width: 100%; border-collapse: collapse;">
+                  <thead>
+                    <tr>
+                      <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0;">Room</th>
+                      <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0;">Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${roomDetails}
+                  </tbody>
+                </table>
+              </div>
+              
+              ${booking.specialRequests ? `
+              <h3 style="color: #4a6baf; margin-top: 20px;">Special Requests</h3>
+              <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 5px; padding: 15px;">
+                <p style="margin: 0;">${booking.specialRequests}</p>
+              </div>
+              ` : ''}
+              
+              <div style="margin-top: 30px; background-color: #f0f5ff; padding: 15px; border-radius: 5px;">
+                <h3 style="color: #4a6baf; margin-top: 0;">Hotel Information</h3>
+                <p style="margin: 5px 0;"><strong>Address:</strong> ${process.env.HOTEL_ADDRESS}</p>
+                <p style="margin: 5px 0;"><strong>Phone:</strong> ${process.env.HOTEL_PHONE}</p>
+                <p style="margin: 5px 0;"><strong>Email:</strong> ${process.env.FROM_EMAIL}</p>
+              </div>
+              
+              <div style="margin-top: 30px; text-align: center; color: #666; font-size: 14px; border-top: 1px solid #e0e0e0; padding-top: 15px;">
+                <p>Thank you for choosing ${process.env.HOTEL_NAME}! We look forward to serving you.</p>
+                <p>Please present this confirmation at check-in.</p>
+              </div>
+            </div>
+          </div>
+        `
+      };
+
+      await emailTransporter.sendMail(customerMail);
+      console.log(`Sent confirmation to customer: ${booking.customerEmail}`);
+    }
+
+    // Admin notification
+    const adminMail = {
+      from: `"${process.env.HOTEL_NAME} Booking System" <${process.env.FROM_EMAIL}>`,
+      to: process.env.ADMIN_EMAIL,
+      subject: `New Booking: ${booking.customerName} (${booking._id.toString().slice(-6)})`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden;">
+          <div style="background-color: #d9534f; color: white; padding: 20px; text-align: center;">
+            <h1 style="margin: 0; font-size: 24px;">New Booking Received</h1>
+            <p style="margin: 5px 0 0; font-size: 16px;">${process.env.HOTEL_NAME}</p>
+          </div>
+          
+          <div style="padding: 20px; background-color: #f9f9f9;">
+            <h2 style="color: #d9534f; margin-top: 0;">Booking Summary</h2>
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+              <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0; width: 40%;"><strong>Booking ID:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking._id.toString().slice(-6)}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Guest Name:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.customerName}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Phone:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.customerPhone}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Email:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.customerEmail || 'Not provided'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Check-in:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${formatDate(booking.checkInDate)}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Check-out:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${formatDate(booking.checkOutDate)}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Total Nights:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${nights}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Payment Method:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.paymentMethod === 'online' ? 'Online Payment' : 'Pay at Hotel'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Payment Status:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.paymentStatus === 'Completed' ? 'Paid' : 'Pending'}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px;"><strong>Total Amount:</strong></td>
+                <td style="padding: 8px;"><strong>₹${booking.totalAmount}</strong></td>
+              </tr>
+            </table>
+            
+            <h3 style="color: #d9534f; margin-top: 20px;">Room Details</h3>
+            <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 5px; padding: 15px;">
+              <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                  <tr>
+                    <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0;">Room</th>
+                    <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0;">Price</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${roomDetails}
+                </tbody>
+              </table>
+            </div>
+            
+            ${booking.specialRequests ? `
+            <h3 style="color: #d9534f; margin-top: 20px;">Special Requests</h3>
+            <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 5px; padding: 15px;">
+              <p style="margin: 0;">${booking.specialRequests}</p>
+            </div>
+            ` : ''}
+            
+            <div style="margin-top: 30px; text-align: center;">
+              <a href="${process.env.ADMIN_PANEL_URL || 'http://your-admin-panel.com'}" 
+                 style="background-color: #d9534f; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                View in Admin Panel
+              </a>
+            </div>
+          </div>
+        </div>
+      `
+    };
+
+    await emailTransporter.sendMail(adminMail);
+    console.log(`Sent notification to admin: ${process.env.ADMIN_EMAIL}`);
+
+    return true;
+  } catch (error) {
+    console.error('Error sending booking emails:', {
+      error: error.message,
+      stack: error.stack,
+      response: error.response
+    });
+    return false;
+  }
+}
 
 // Initialize rooms
 async function initializeRooms() {
@@ -132,154 +365,45 @@ async function initializeRooms() {
           type: 'AC',
           roomNumber: `AC-${i+1}`,
           isAvailable: true,
-          price: 2500
+          price: 2500,
+          capacity: 2,
+          amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom']
         })),
         // Non-AC Rooms (4)
         ...Array.from({ length: 4 }, (_, i) => ({
           type: 'Non-AC',
           roomNumber: `NAC-${i+1}`,
           isAvailable: true,
-          price: 1800
+          price: 1800,
+          capacity: 2,
+          amenities: ['Fan', 'TV', 'WiFi', 'Attached Bathroom']
         })),
         // General Rooms (4)
         ...Array.from({ length: 4 }, (_, i) => ({
           type: 'General',
           roomNumber: `GEN-${i+1}`,
           isAvailable: true,
-          price: 1200
+          price: 1200,
+          capacity: 4,
+          amenities: ['Fan', 'Shared Bathroom']
         }))
       ];
       
       await Room.insertMany(rooms);
       console.log('Successfully initialized rooms');
-    } else {
-      console.log('Rooms already exist in database');
     }
   } catch (error) {
     console.error('Error initializing rooms:', error);
-    setTimeout(initializeRooms, 5000);
-  }
-}
-
-// Function to send booking emails
-async function sendBookingEmails(booking, rooms) {
-  try {
-    const checkInDate = booking.checkInDate.toDateString();
-    const checkOutDate = booking.checkOutDate.toDateString();
-    const roomNumbers = booking.selectedRooms.map(r => r.roomNumber).join(', ');
-    const arrivalTime = booking.arrivalTime ? new Date(booking.arrivalTime).toLocaleTimeString() : 'Not specified';
-    
-    // Customer email
-    if (booking.customerEmail) {
-      const customerMailOptions = {
-        from: `"Hotel Booking System" <${process.env.FROM_EMAIL}>`,
-        to: booking.customerEmail,
-        subject: 'Your Booking Confirmation',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h1 style="color: #2c3e50;">Thank you for your booking, ${booking.customerName}!</h1>
-            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px;">
-              <h2 style="color: #3498db;">Booking Details</h2>
-              <p><strong>Booking ID:</strong> ${booking._id}</p>
-              <p><strong>Room Type:</strong> ${booking.roomType}</p>
-              <p><strong>Room Numbers:</strong> ${roomNumbers}</p>
-              <p><strong>Check-in Date:</strong> ${checkInDate}</p>
-              <p><strong>Check-out Date:</strong> ${checkOutDate}</p>
-              <p><strong>Arrival Time:</strong> ${arrivalTime}</p>
-              <p><strong>Total Amount:</strong> ₹${booking.totalAmount}</p>
-              <p><strong>Payment Status:</strong> ${booking.paymentStatus}</p>
-              <p><strong>Payment Method:</strong> ${booking.paymentMethod}</p>
-            </div>
-            <p style="margin-top: 20px;">If you have any questions or need to modify your booking, please contact us.</p>
-            <p>We look forward to serving you!</p>
-            <p style="margin-top: 30px; font-size: 0.9em; color: #7f8c8d;">This is an automated message. Please do not reply directly to this email.</p>
-          </div>
-        `
-      };
-
-      await emailTransporter.sendMail(customerMailOptions);
-      console.log('Customer confirmation email sent');
-    }
-
-    // Admin email
-    const adminMailOptions = {
-      from: `"Hotel Booking System" <${process.env.FROM_EMAIL}>`,
-      to: process.env.ADMIN_EMAIL,
-      subject: `New Booking: ${booking.customerName}`,
-      html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h1 style="color: #2c3e50;">New Booking Received</h1>
-          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 20px;">
-            <h2 style="color: #3498db;">Customer Details</h2>
-            <p><strong>Name:</strong> ${booking.customerName}</p>
-            <p><strong>Phone:</strong> ${booking.customerPhone}</p>
-            <p><strong>Email:</strong> ${booking.customerEmail || 'Not provided'}</p>
-            <p><strong>Address:</strong> ${booking.customerAddress || 'Not provided'}</p>
-          </div>
-          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px;">
-            <h2 style="color: #3498db;">Booking Details</h2>
-            <p><strong>Booking ID:</strong> ${booking._id}</p>
-            <p><strong>Room Type:</strong> ${booking.roomType}</p>
-            <p><strong>Room Numbers:</strong> ${roomNumbers}</p>
-            <p><strong>Check-in Date:</strong> ${checkInDate}</p>
-            <p><strong>Check-out Date:</strong> ${checkOutDate}</p>
-            <p><strong>Arrival Time:</strong> ${arrivalTime}</p>
-            <p><strong>Total Amount:</strong> ₹${booking.totalAmount}</p>
-            <p><strong>Payment Status:</strong> ${booking.paymentStatus}</p>
-            <p><strong>Payment Method:</strong> ${booking.paymentMethod}</p>
-            <p><strong>Special Requests:</strong> ${booking.specialRequests || 'None'}</p>
-          </div>
-        </div>
-      `
-    };
-
-    await emailTransporter.sendMail(adminMailOptions);
-    console.log('Admin notification email sent');
-  } catch (error) {
-    console.error('Email sending error:', error);
   }
 }
 
 // Routes
 app.get('/api/health', (req, res) => {
-  const status = mongoose.connection.readyState === 1 ? 'healthy' : 'unhealthy';
   res.json({
-    status,
+    status: 'healthy',
     dbState: mongoose.STATES[mongoose.connection.readyState],
     timestamp: new Date()
   });
-});
-
-// Admin login
-app.post('/api/admin/login', (req, res) => {
-  const { username, password } = req.body;
-  if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
-    res.json({ success: true, message: 'Login successful' });
-  } else {
-    res.status(401).json({ success: false, message: 'Invalid credentials' });
-  }
-});
-
-// Get all bookings with pagination
-app.get('/api/admin/bookings', async (req, res) => {
-  try {
-    const { page = 1, limit = 10 } = req.query;
-    const bookings = await Booking.find()
-      .sort({ bookingDate: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .exec();
-    
-    const count = await Booking.countDocuments();
-    
-    res.json({
-      bookings,
-      totalPages: Math.ceil(count / limit),
-      currentPage: page
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
 });
 
 // Get available rooms by type
@@ -299,129 +423,82 @@ app.get('/api/rooms/available/:type', async (req, res) => {
   }
 });
 
-// Create booking with validation
+// Create booking
 app.post('/api/bookings', upload.single('paymentProof'), async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const { 
-      customerName, 
-      customerPhone, 
-      customerEmail,
-      customerAddress,
-      roomType, 
-      selectedRooms,
-      checkInDate, 
-      checkOutDate,
-      arrivalTime,
-      specialRequests,
-      paymentMethod
-    } = req.body;
-    
-    // Validate input
-    if (!customerName || !customerPhone || !roomType || !selectedRooms || !checkInDate || !checkOutDate) {
-      return res.status(400).json({ message: 'All required fields are missing' });
-    }
-    
-    // Parse the selected rooms
-    const rooms = JSON.parse(selectedRooms);
-    if (!Array.isArray(rooms)) {
-      return res.status(400).json({ message: 'Invalid room selection' });
-    }
-    
-    // Validate all rooms are available
-    for (const room of rooms) {
-      const roomDoc = await Room.findOne({ roomNumber: room.roomNumber });
-      if (!roomDoc || !roomDoc.isAvailable || roomDoc.type !== roomType) {
-        return res.status(400).json({ message: `Room ${room.roomNumber} not available or type mismatch` });
-      }
-    }
-    
-    // Validate dates
-    const checkIn = new Date(checkInDate);
-    const checkOut = new Date(checkOutDate);
-    if (checkIn >= checkOut) {
-      return res.status(400).json({ message: 'Check-out date must be after check-in date' });
-    }
-    
+    const formData = req.body;
+    const selectedRooms = JSON.parse(formData.selectedRooms);
+
     // Calculate total amount
-    const days = Math.ceil((checkOut - checkIn) / (1000 * 60 * 60 * 24));
-    const totalAmount = days * rooms.reduce((sum, room) => sum + room.price, 0);
-    
-    // Create booking
+    const nights = Math.ceil((new Date(formData.checkOutDate) - new Date(formData.checkInDate)) / (1000 * 60 * 60 * 24));
+    const totalAmount = selectedRooms.reduce((sum, room) => sum + (room.price * nights), 0);
+
     const booking = new Booking({
-      customerName,
-      customerPhone,
-      customerEmail,
-      customerAddress,
-      roomType,
-      selectedRooms: rooms,
-      checkInDate: checkIn,
-      checkOutDate: checkOut,
-      arrivalTime: arrivalTime ? new Date(arrivalTime) : null,
+      customerName: formData.customerName,
+      customerPhone: formData.customerPhone,
+      customerEmail: formData.customerEmail || undefined,
+      customerAddress: formData.customerAddress || undefined,
+      roomType: formData.roomType,
+      selectedRooms,
+      checkInDate: new Date(formData.checkInDate),
+      checkOutDate: new Date(formData.checkOutDate),
+      arrivalTime: formData.arrivalTime ? new Date(formData.arrivalTime) : undefined,
       totalAmount,
-      paymentMethod,
-      specialRequests
+      paymentMethod: formData.paymentMethod,
+      paymentStatus: formData.paymentMethod === 'cash' ? 'Pending' : 'Pending',
+      paymentProof: req.file ? `/uploads/${req.file.filename}` : undefined,
+      specialRequests: formData.specialRequests || undefined
     });
-    
-    // Add payment proof if uploaded
-    if (req.file) {
-      booking.paymentProof = {
-        data: req.file.buffer,
-        contentType: req.file.mimetype
-      };
-    }
-    
-    // Update room availability in a transaction
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    
-    try {
-      // Mark all selected rooms as unavailable
-      await Room.updateMany(
-        { roomNumber: { $in: rooms.map(r => r.roomNumber) } },
-        { $set: { isAvailable: false } },
-        { session }
-      );
-      
-      const savedBooking = await booking.save({ session });
-      
-      await session.commitTransaction();
-      
-      // Send email notifications
-      sendBookingEmails(savedBooking, rooms)
-        .catch(err => console.error('Email sending failed:', err));
-      
-      res.status(201).json(savedBooking);
-    } catch (transactionError) {
-      await session.abortTransaction();
-      throw transactionError;
-    } finally {
-      session.endSession();
-    }
+
+    const savedBooking = await booking.save({ session });
+
+    // Mark rooms as unavailable
+    await Room.updateMany(
+      { roomNumber: { $in: selectedRooms.map(r => r.roomNumber) } },
+      { $set: { isAvailable: false } },
+      { session }
+    );
+
+    await session.commitTransaction();
+
+    // Send emails
+    const emailSent = await sendBookingEmails(savedBooking);
+
+    res.status(201).json({
+      ...savedBooking.toObject(),
+      emailSent,
+      message: 'Booking created successfully'
+    });
+
   } catch (error) {
-    res.status(400).json({ message: error.message });
+    await session.abortTransaction();
+    console.error('Booking creation error:', error);
+    res.status(400).json({ 
+      message: 'Failed to create booking',
+      error: error.message 
+    });
+  } finally {
+    session.endSession();
   }
 });
 
 // Complete payment
 app.put('/api/bookings/:id/payment', async (req, res) => {
   try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ message: 'Invalid booking ID' });
-    }
+    const booking = await Booking.findByIdAndUpdate(
+      req.params.id,
+      { paymentStatus: 'Completed' },
+      { new: true }
+    );
     
-    const booking = await Booking.findById(req.params.id);
     if (!booking) {
       return res.status(404).json({ message: 'Booking not found' });
     }
     
-    if (booking.paymentStatus === 'Completed') {
-      return res.status(400).json({ message: 'Payment already completed' });
-    }
-    
-    booking.paymentStatus = 'Completed';
-    const updatedBooking = await booking.save();
-    
-    res.json(updatedBooking);
+    res.json(booking);
   } catch (error) {
     res.status(400).json({ message: error.message });
   }
@@ -429,40 +506,35 @@ app.put('/api/bookings/:id/payment', async (req, res) => {
 
 // Checkout and make room available
 app.put('/api/bookings/:id/checkout', async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  
   try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ message: 'Invalid booking ID' });
-    }
-    
-    const booking = await Booking.findById(req.params.id);
+    const booking = await Booking.findById(req.params.id).session(session);
     if (!booking) {
+      await session.abortTransaction();
       return res.status(404).json({ message: 'Booking not found' });
     }
     
-    const session = await mongoose.startSession();
-    session.startTransaction();
+    await Room.updateMany(
+      { roomNumber: { $in: booking.selectedRooms.map(r => r.roomNumber) } },
+      { $set: { isAvailable: true } },
+      { session }
+    );
     
-    try {
-      // Find and update all rooms in the booking
-      await Room.updateMany(
-        { roomNumber: { $in: booking.selectedRooms.map(r => r.roomNumber) } },
-        { $set: { isAvailable: true } },
-        { session }
-      );
-      
-      await session.commitTransaction();
-      res.json({ 
-        message: 'Checkout successful', 
-        roomNumbers: booking.selectedRooms.map(r => r.roomNumber) 
-      });
-    } catch (transactionError) {
-      await session.abortTransaction();
-      throw transactionError;
-    } finally {
-      session.endSession();
-    }
+    booking.bookingStatus = 'Completed';
+    await booking.save({ session });
+    
+    await session.commitTransaction();
+    res.json({ 
+      message: 'Checkout successful', 
+      roomNumbers: booking.selectedRooms.map(r => r.roomNumber) 
+    });
   } catch (error) {
+    await session.abortTransaction();
     res.status(400).json({ message: error.message });
+  } finally {
+    session.endSession();
   }
 });
 
@@ -472,17 +544,17 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: 'Something went wrong!' });
 });
 
-// Start server only after MongoDB is connected
+// Start server
 db.once('open', () => {
-  console.log('Connected to MongoDB');
   initializeRooms();
   
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    console.log('SMTP Configuration:', {
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT,
+      from: process.env.FROM_EMAIL,
+      admin: process.env.ADMIN_EMAIL
+    });
   });
-});
-
-// Handle MongoDB connection errors
-db.on('error', (err) => {
-  console.error('MongoDB connection error:', err);
 });
