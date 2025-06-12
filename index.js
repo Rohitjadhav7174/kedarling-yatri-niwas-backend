@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 5001;
 
 // Middleware
 app.use(cors({
-  origin: 'http://localhost:3000', // your frontend URL
+  origin: 'https://kedarling-yatri-niwas-frontend.vercel.app/', // your frontend URL
   credentials: true // if using cookies or auth headers
 }));
 app.use(bodyParser.json({ limit: '10mb' }));
