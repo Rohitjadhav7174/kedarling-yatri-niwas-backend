@@ -12,11 +12,20 @@ const PORT = process.env.PORT || 5001;
 
 // Middleware
 
-app.use(cors({
-  origin: "https://kedarling-yatri-niwas-frontend.vercel.app", // or "*" during development
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  credentials: true
+app.use(cors({  
+  origin: [
+    "https://kedarling-yatri-niwas-frontend.vercel.app",
+    "http://localhost:3000", // for local development
+    "http://localhost:3001"
+  ],
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  credentials: true,
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
 }));
+
+// Handle preflight requests
+app.options('*', cors());
+
 
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
