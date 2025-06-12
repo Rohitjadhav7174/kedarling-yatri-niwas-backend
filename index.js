@@ -11,22 +11,10 @@ const app = express();
 const PORT = process.env.PORT || 5001;
 
 // Middleware
-
-app.use(cors({  
-  origin: [
-    "https://kedarling-yatri-niwas-frontend.vercel.app",
-    "http://localhost:3000", // for local development
-    "http://localhost:3001"
-  ],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  credentials: true,
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"]
+app.use(cors({
+  origin: 'http://localhost:3000', // your frontend URL
+  credentials: true // if using cookies or auth headers
 }));
-
-// Handle preflight requests
-app.options('*', cors());
-
-
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -367,7 +355,11 @@ async function sendBookingEmails(booking) {
     return false;
   }
 }
-
+// Admin credentials
+const ADMIN_CREDENTIALS = {
+  username: process.env.ADMIN_USERNAME || 'admin',
+  password: process.env.ADMIN_PASSWORD || 'admin123'
+};
 // Initialize rooms
 async function initializeRooms() {
   try {
@@ -433,6 +425,38 @@ app.get('/api/rooms/available/:type', async (req, res) => {
       isAvailable: true
     });
     res.json(availableRooms);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Admin login
+app.post('/api/admin/login', (req, res) => {
+  const { username, password } = req.body;
+  if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
+    res.json({ success: true, message: 'Login successful' });
+  } else {
+    res.status(401).json({ success: false, message: 'Invalid credentials' });
+  }
+});
+
+// Get all bookings with pagination
+app.get('/api/admin/bookings', async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    const bookings = await Booking.find()
+      .sort({ bookingDate: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .exec();
+    
+    const count = await Booking.countDocuments();
+    
+    res.json({
+      bookings,
+      totalPages: Math.ceil(count / limit),
+      currentPage: page
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -550,6 +574,101 @@ app.put('/api/bookings/:id/checkout', async (req, res) => {
     res.status(400).json({ message: error.message });
   } finally {
     session.endSession();
+  }
+});
+
+// Admin login
+app.post('/api/admin/login', (req, res) => {
+  const { username, password } = req.body;
+  if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
+    res.json({ success: true, message: 'Login successful' });
+  } else {
+    res.status(401).json({ success: false, message: 'Invalid credentials' });
+  }
+});
+
+// Get all bookings with pagination
+app.get('/api/admin/bookings', async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
+    const bookings = await Booking.find()
+      .sort({ bookingDate: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit)
+      .exec();
+    
+    const count = await Booking.countDocuments();
+    
+    res.json({
+      bookings,
+      totalPages: Math.ceil(count / limit),
+      currentPage: page
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+app.put('/api/bookings/:id/payment', async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid booking ID' });
+    }
+    
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+    
+    if (booking.paymentStatus === 'Completed') {
+      return res.status(400).json({ message: 'Payment already completed' });
+    }
+    
+    booking.paymentStatus = 'Completed';
+    const updatedBooking = await booking.save();
+    
+    res.json(updatedBooking);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// Checkout and make room available
+app.put('/api/bookings/:id/checkout', async (req, res) => {
+  try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid booking ID' });
+    }
+    
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) {
+      return res.status(404).json({ message: 'Booking not found' });
+    }
+    
+    const session = await mongoose.startSession();
+    session.startTransaction();
+    
+    try {
+      // Find and update all rooms in the booking
+      await Room.updateMany(
+        { roomNumber: { $in: booking.selectedRooms.map(r => r.roomNumber) } },
+        { $set: { isAvailable: true } },
+        { session }
+      );
+      
+      await session.commitTransaction();
+      res.json({ 
+        message: 'Checkout successful', 
+        roomNumbers: booking.selectedRooms.map(r => r.roomNumber) 
+      });
+    } catch (transactionError) {
+      await session.abortTransaction();
+      throw transactionError;
+    } finally {
+      session.endSession();
+    }
+  } catch (error) {
+    res.status(400).json({ message: error.message });
   }
 });
 
