@@ -17,7 +17,7 @@ app.use(cors({
     if (!origin) return callback(null, true);
     
     const allowedOrigins = [
-      'https://www.kedarlingyatrinivas.com',
+      'https://kedarlingyatrinivas.com',
       'http://localhost:3000',
       'http://localhost:3001'
     ];
