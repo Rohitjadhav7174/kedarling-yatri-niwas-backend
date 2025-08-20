@@ -34,6 +34,7 @@ app.use(cors({
 app.use(bodyParser.json({ limit: '10mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 
 // Verify essential environment variables
 const requiredEnvVars = [
@@ -117,8 +118,9 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// Room Schema
+// Room Schema - Removed images field since we're using hardcoded paths
 const roomSchema = new mongoose.Schema({
+  roomCategory: { type: String, enum: ['Suite', 'Standard'], required: true },
   type: { type: String, enum: ['AC', 'Non-AC', 'General'], required: true },
   roomNumber: { type: String, required: true, unique: true },
   isAvailable: { type: Boolean, default: true },
@@ -135,6 +137,7 @@ const bookingSchema = new mongoose.Schema({
   customerPhone: { type: String, required: true },
   customerEmail: { type: String },
   customerAddress: { type: String },
+  roomCategory: { type: String, enum: ['Suite', 'Standard'], required: true },
   roomType: { type: String, enum: ['AC', 'Non-AC', 'General'], required: true },
   selectedRooms: [{
     roomNumber: { type: String, required: true },
@@ -205,6 +208,14 @@ async function sendBookingEmails(booking) {
                   <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.customerName}</td>
                 </tr>
                 <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Room Category:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.roomCategory}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Room Type:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.roomType}</td>
+                </tr>
+                <tr>
                   <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Check-in:</strong></td>
                   <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${formatDate(booking.checkInDate)}</td>
                 </tr>
@@ -213,52 +224,30 @@ async function sendBookingEmails(booking) {
                   <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${formatDate(booking.checkOutDate)}</td>
                 </tr>
                 <tr>
-                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Total Nights:</strong></td>
+                  <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Nights:</strong></td>
                   <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${nights}</td>
                 </tr>
                 <tr>
                   <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Total Amount:</strong></td>
                   <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">₹${booking.totalAmount}</td>
                 </tr>
-                <tr>
-                  <td style="padding: 8px;"><strong>Status:</strong></td>
-                  <td style="padding: 8px;">Confirmed</td>
-                </tr>
               </table>
               
               <h3 style="color: #4a6baf; margin-top: 20px;">Room Details</h3>
-              <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 5px; padding: 15px;">
-                <table style="width: 100%; border-collapse: collapse;">
-                  <thead>
-                    <tr>
-                      <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0;">Room</th>
-                      <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0;">Price</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${roomDetails}
-                  </tbody>
-                </table>
-              </div>
-              
-              ${booking.specialRequests ? `
-              <h3 style="color: #4a6baf; margin-top: 20px;">Special Requests</h3>
-              <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 5px; padding: 15px;">
-                <p style="margin: 0;">${booking.specialRequests}</p>
-              </div>
-              ` : ''}
-              
-              <div style="margin-top: 30px; background-color: #f0f5ff; padding: 15px; border-radius: 5px;">
-                <h3 style="color: #4a6baf; margin-top: 0;">Hotel Information</h3>
-                <p style="margin: 5px 0;"><strong>Address:</strong> ${process.env.HOTEL_ADDRESS}</p>
-                <p style="margin: 5px 0;"><strong>Phone:</strong> ${process.env.HOTEL_PHONE}</p>
-                <p style="margin: 5px 0;"><strong>Email:</strong> ${process.env.FROM_EMAIL}</p>
-              </div>
-              
-              <div style="margin-top: 30px; text-align: center; color: #666; font-size: 14px; border-top: 1px solid #e0e0e0; padding-top: 15px;">
-                <p>Thank you for choosing ${process.env.HOTEL_NAME}! We look forward to serving you.</p>
-                <p>Please present this confirmation at check-in.</p>
-              </div>
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <th style="padding: 8px; border-bottom: 2px solid #4a6baf; text-align: left;">Room Number</th>
+                  <th style="padding: 8px; border-bottom: 2px solid #4a6baf; text-align: left;">Price per Night</th>
+                </tr>
+                ${roomDetails}
+              </table>
+            </div>
+            
+            <div style="padding: 20px; background-color: #e8f4f8; border-top: 1px solid #e0e0e0;">
+              <h3 style="color: #4a6baf; margin-top: 0;">Contact Information</h3>
+              <p style="margin: 5px 0;"><strong>Hotel:</strong> ${process.env.HOTEL_NAME}</p>
+              <p style="margin: 5px 0;"><strong>Address:</strong> ${process.env.HOTEL_ADDRESS}</p>
+              <p style="margin: 5px 0;"><strong>Phone:</strong> ${process.env.HOTEL_PHONE}</p>
             </div>
           </div>
         `
@@ -292,6 +281,14 @@ async function sendBookingEmails(booking) {
                 <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.customerName}</td>
               </tr>
               <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Room Category:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.roomCategory}</td>
+              </tr>
+              <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Room Type:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.roomType}</td>
+              </tr>
+              <tr>
                 <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Phone:</strong></td>
                 <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.customerPhone}</td>
               </tr>
@@ -308,51 +305,38 @@ async function sendBookingEmails(booking) {
                 <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${formatDate(booking.checkOutDate)}</td>
               </tr>
               <tr>
-                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Total Nights:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Nights:</strong></td>
                 <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${nights}</td>
               </tr>
               <tr>
-                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Payment Method:</strong></td>
-                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.paymentMethod === 'online' ? 'Online Payment' : 'Pay at Hotel'}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Total Amount:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">₹${booking.totalAmount}</td>
               </tr>
               <tr>
                 <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Payment Status:</strong></td>
-                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.paymentStatus === 'Completed' ? 'Paid' : 'Pending'}</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.paymentStatus}</td>
               </tr>
               <tr>
-                <td style="padding: 8px;"><strong>Total Amount:</strong></td>
-                <td style="padding: 8px;"><strong>₹${booking.totalAmount}</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;"><strong>Payment Method:</strong></td>
+                <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${booking.paymentMethod}</td>
               </tr>
             </table>
             
             <h3 style="color: #d9534f; margin-top: 20px;">Room Details</h3>
-            <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 5px; padding: 15px;">
-              <table style="width: 100%; border-collapse: collapse;">
-                <thead>
-                  <tr>
-                    <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0;">Room</th>
-                    <th style="padding: 8px; text-align: left; border-bottom: 2px solid #e0e0e0;">Price</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${roomDetails}
-                </tbody>
-              </table>
-            </div>
+            <table style="width: 100%; border-collapse: collapse;">
+              <tr>
+                <th style="padding: 8px; border-bottom: 2px solid #d9534f; text-align: left;">Room Number</th>
+                <th style="padding: 8px; border-bottom: 2px solid #d9534f; text-align: left;">Price per Night</th>
+              </tr>
+              ${roomDetails}
+            </table>
             
             ${booking.specialRequests ? `
-            <h3 style="color: #d9534f; margin-top: 20px;">Special Requests</h3>
-            <div style="background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 5px; padding: 15px;">
-              <p style="margin: 0;">${booking.specialRequests}</p>
-            </div>
+              <h3 style="color: #d9534f; margin-top: 20px;">Special Requests</h3>
+              <p style="background-color: #fff3cd; padding: 10px; border-radius: 4px; border-left: 4px solid #ffeaa7;">
+                ${booking.specialRequests}
+              </p>
             ` : ''}
-            
-            <div style="margin-top: 30px; text-align: center;">
-              <a href="${process.env.ADMIN_PANEL_URL || 'http://your-admin-panel.com'}" 
-                 style="background-color: #d9534f; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
-                View in Admin Panel
-              </a>
-            </div>
           </div>
         </div>
       `
@@ -371,49 +355,60 @@ async function sendBookingEmails(booking) {
     return false;
   }
 }
-// Admin credentials
-const ADMIN_CREDENTIALS = {
-  username: process.env.ADMIN_USERNAME || 'admin',
-  password: process.env.ADMIN_PASSWORD || 'admin123'
-};
-// Initialize rooms
+
+// Initialize rooms with Suite and Standard categories
 async function initializeRooms() {
   try {
     const roomCount = await Room.estimatedDocumentCount();
     
     if (roomCount === 0) {
       const rooms = [
-        // AC Rooms (4)
-        ...Array.from({ length: 4 }, (_, i) => ({
-          type: 'AC',
-          roomNumber: `AC-${i+1}`,
-          isAvailable: true,
-          price: 2500,
-          capacity: 2,
-          amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom']
-        })),
-        // Non-AC Rooms (4)
-        ...Array.from({ length: 4 }, (_, i) => ({
-          type: 'Non-AC',
-          roomNumber: `NAC-${i+1}`,
-          isAvailable: true,
-          price: 1800,
-          capacity: 2,
-          amenities: ['Fan', 'TV', 'WiFi', 'Attached Bathroom']
-        })),
-        // General Rooms (4)
-        ...Array.from({ length: 4 }, (_, i) => ({
-          type: 'General',
-          roomNumber: `GEN-${i+1}`,
-          isAvailable: true,
-          price: 1200,
-          capacity: 4,
-          amenities: ['Fan', 'Shared Bathroom']
-        }))
+        // Suite AC Rooms
+        { roomCategory: 'Suite', type: 'AC', roomNumber: 'Suite AC 1', price: 2000, capacity: 2, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'AC', roomNumber: 'Suite AC 2', price: 2000, capacity: 3, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'AC', roomNumber: 'Suite AC 3', price: 2000, capacity: 3, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'AC', roomNumber: 'Suite AC 4', price: 2000, capacity: 4, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'AC', roomNumber: 'Suite AC 5', price: 2000, capacity: 2, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'AC', roomNumber: 'Suite AC 6', price: 2000, capacity: 2, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'AC', roomNumber: 'Suite AC 7', price: 2200, capacity: 4, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'AC', roomNumber: 'Suite AC 8', price: 2200, capacity: 4, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        
+        // Suite Non-AC Rooms
+        { roomCategory: 'Suite', type: 'Non-AC', roomNumber: 'Suite Non-AC 1', price: 1500, capacity: 2, amenities: ['Fan', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'Non-AC', roomNumber: 'Suite Non-AC 2', price: 1500, capacity: 3, amenities: ['Fan', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'Non-AC', roomNumber: 'Suite Non-AC 3', price: 1500, capacity: 3, amenities: ['Fan', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'Non-AC', roomNumber: 'Suite Non-AC 4', price: 1500, capacity: 4, amenities: ['Fan', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'Non-AC', roomNumber: 'Suite Non-AC 5', price: 1500, capacity: 2, amenities: ['Fan', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'Non-AC', roomNumber: 'Suite Non-AC 6', price: 1500, capacity: 4, amenities: ['Fan', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'Non-AC', roomNumber: 'Suite Non-AC 7', price: 1800, capacity: 4, amenities: ['Fan', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        { roomCategory: 'Suite', type: 'Non-AC', roomNumber: 'Suite Non-AC 8', price: 1800, capacity: 4, amenities: ['Fan', 'TV', 'WiFi', 'Attached Bathroom', 'Mini Bar', 'Sofa'] },
+        
+        // Standard AC Rooms
+        { roomCategory: 'Standard', type: 'AC', roomNumber: '101', price: 1200, capacity: 2, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom'] },
+        { roomCategory: 'Standard', type: 'AC', roomNumber: '102', price: 1200, capacity: 2, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom'] },
+        { roomCategory: 'Standard', type: 'AC', roomNumber: '108', price: 1200, capacity: 2, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom'] },
+        { roomCategory: 'Standard', type: 'AC', roomNumber: '109', price: 1200, capacity: 2, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom'] },
+        { roomCategory: 'Standard', type: 'AC', roomNumber: '110', price: 1200, capacity: 2, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom'] },
+        { roomCategory: 'Standard', type: 'AC', roomNumber: '111', price: 1200, capacity: 2, amenities: ['AC', 'TV', 'WiFi', 'Attached Bathroom'] },
+        
+        // Standard Non-AC Rooms
+        { roomCategory: 'Standard', type: 'Non-AC', roomNumber: '103', price: 1000, capacity: 2, amenities: ['Fan', 'TV', 'Attached Bathroom'] },
+        { roomCategory: 'Standard', type: 'Non-AC', roomNumber: '104', price: 1000, capacity: 2, amenities: ['Fan', 'TV', 'Attached Bathroom'] },
+        { roomCategory: 'Standard', type: 'Non-AC', roomNumber: '105', price: 1000, capacity: 2, amenities: ['Fan', 'TV', 'Attached Bathroom'] },
+        { roomCategory: 'Standard', type: 'Non-AC', roomNumber: '106', price: 1000, capacity: 2, amenities: ['Fan', 'TV', 'Attached Bathroom'] },
+        { roomCategory: 'Standard', type: 'Non-AC', roomNumber: '107', price: 1000, capacity: 2, amenities: ['Fan', 'TV', 'Attached Bathroom'] },
+        
+        // Standard General Rooms
+        { roomCategory: 'Standard', type: 'General', roomNumber: '112', price: 800, capacity: 4, amenities: ['Fan', 'Shared Bathroom'] },
+        { roomCategory: 'Standard', type: 'General', roomNumber: '113', price: 800, capacity: 4, amenities: ['Fan', 'Shared Bathroom'] },
+        { roomCategory: 'Standard', type: 'General', roomNumber: '114', price: 800, capacity: 4, amenities: ['Fan', 'Shared Bathroom'] },
+        { roomCategory: 'Standard', type: 'General', roomNumber: '115', price: 800, capacity: 4, amenities: ['Fan', 'Shared Bathroom'] },
+        { roomCategory: 'Standard', type: 'General', roomNumber: '116', price: 800, capacity: 4, amenities: ['Fan', 'Shared Bathroom'] },
+        { roomCategory: 'Standard', type: 'General', roomNumber: '117', price: 800, capacity: 4, amenities: ['Fan', 'Shared Bathroom'] }
       ];
       
       await Room.insertMany(rooms);
-      console.log('Successfully initialized rooms');
+      console.log('Successfully initialized rooms with Suite and Standard categories');
     }
   } catch (error) {
     console.error('Error initializing rooms:', error);
@@ -429,52 +424,56 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Get available rooms by type
-app.get('/api/rooms/available/:type', async (req, res) => {
+// Get available rooms by category and type
+app.get('/api/rooms/available', async (req, res) => {
   try {
-    if (!['AC', 'Non-AC', 'General'].includes(req.params.type)) {
-      return res.status(400).json({ message: 'Invalid room type' });
+    const { checkIn, checkOut, category, type } = req.query;
+    
+    if (!checkIn || !checkOut) {
+      return res.status(400).json({ message: 'Check-in and check-out dates are required' });
     }
     
-    const availableRooms = await Room.find({
-      type: req.params.type,
-      isAvailable: true
+    const checkInDate = new Date(checkIn);
+    const checkOutDate = new Date(checkOut);
+    
+    // Find all bookings that overlap with the requested dates
+    const overlappingBookings = await Booking.find({
+      $or: [
+        { 
+          checkInDate: { $lt: checkOutDate },
+          checkOutDate: { $gt: checkInDate },
+          bookingStatus: { $ne: 'Cancelled' }
+        }
+      ]
     });
+    
+    // Get room numbers that are booked
+    const bookedRoomNumbers = overlappingBookings.flatMap(booking => 
+      booking.selectedRooms.map(room => room.roomNumber)
+    );
+    
+    // Build query for available rooms
+    const roomQuery = {
+      roomNumber: { $nin: bookedRoomNumbers }
+    };
+    
+    // Add category filter if specified
+    if (category) {
+      roomQuery.roomCategory = category;
+    }
+    
+    // Add type filter if specified
+    if (type) {
+      roomQuery.type = type;
+    }
+    
+    // Find available rooms
+    const availableRooms = await Room.find(roomQuery);
+    
     res.json(availableRooms);
   } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Admin login
-app.post('/api/admin/login', (req, res) => {
-  const { username, password } = req.body;
-  if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
-    res.json({ success: true, message: 'Login successful' });
-  } else {
-    res.status(401).json({ success: false, message: 'Invalid credentials' });
-  }
-});
-
-// Get all bookings with pagination
-app.get('/api/admin/bookings', async (req, res) => {
-  try {
-    const { page = 1, limit = 10 } = req.query;
-    const bookings = await Booking.find()
-      .sort({ bookingDate: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .exec();
-    
-    const count = await Booking.countDocuments();
-    
-    res.json({
-      bookings,
-      totalPages: Math.ceil(count / limit),
-      currentPage: page
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error('Error fetching available rooms:', error);
+    res.status(500).json({ message: 'Error fetching available rooms', error: error.message });
   }
 });
 
@@ -491,11 +490,16 @@ app.post('/api/bookings', upload.single('paymentProof'), async (req, res) => {
     const nights = Math.ceil((new Date(formData.checkOutDate) - new Date(formData.checkInDate)) / (1000 * 60 * 60 * 24));
     const totalAmount = selectedRooms.reduce((sum, room) => sum + (room.price * nights), 0);
 
+    // Get room category from the first selected room
+    const firstRoom = await Room.findOne({ roomNumber: selectedRooms[0].roomNumber });
+    const roomCategory = firstRoom ? firstRoom.roomCategory : 'Standard';
+
     const booking = new Booking({
       customerName: formData.customerName,
       customerPhone: formData.customerPhone,
       customerEmail: formData.customerEmail || undefined,
       customerAddress: formData.customerAddress || undefined,
+      roomCategory: roomCategory,
       roomType: formData.roomType,
       selectedRooms,
       checkInDate: new Date(formData.checkInDate),
@@ -538,6 +542,7 @@ app.post('/api/bookings', upload.single('paymentProof'), async (req, res) => {
   } finally {
     session.endSession();
   }
+
 });
 
 // Complete payment
@@ -590,101 +595,6 @@ app.put('/api/bookings/:id/checkout', async (req, res) => {
     res.status(400).json({ message: error.message });
   } finally {
     session.endSession();
-  }
-});
-
-// Admin login
-app.post('/api/admin/login', (req, res) => {
-  const { username, password } = req.body;
-  if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
-    res.json({ success: true, message: 'Login successful' });
-  } else {
-    res.status(401).json({ success: false, message: 'Invalid credentials' });
-  }
-});
-
-// Get all bookings with pagination
-app.get('/api/admin/bookings', async (req, res) => {
-  try {
-    const { page = 1, limit = 10 } = req.query;
-    const bookings = await Booking.find()
-      .sort({ bookingDate: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .exec();
-    
-    const count = await Booking.countDocuments();
-    
-    res.json({
-      bookings,
-      totalPages: Math.ceil(count / limit),
-      currentPage: page
-    });
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-});
-
-app.put('/api/bookings/:id/payment', async (req, res) => {
-  try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ message: 'Invalid booking ID' });
-    }
-    
-    const booking = await Booking.findById(req.params.id);
-    if (!booking) {
-      return res.status(404).json({ message: 'Booking not found' });
-    }
-    
-    if (booking.paymentStatus === 'Completed') {
-      return res.status(400).json({ message: 'Payment already completed' });
-    }
-    
-    booking.paymentStatus = 'Completed';
-    const updatedBooking = await booking.save();
-    
-    res.json(updatedBooking);
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-});
-
-// Checkout and make room available
-app.put('/api/bookings/:id/checkout', async (req, res) => {
-  try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ message: 'Invalid booking ID' });
-    }
-    
-    const booking = await Booking.findById(req.params.id);
-    if (!booking) {
-      return res.status(404).json({ message: 'Booking not found' });
-    }
-    
-    const session = await mongoose.startSession();
-    session.startTransaction();
-    
-    try {
-      // Find and update all rooms in the booking
-      await Room.updateMany(
-        { roomNumber: { $in: booking.selectedRooms.map(r => r.roomNumber) } },
-        { $set: { isAvailable: true } },
-        { session }
-      );
-      
-      await session.commitTransaction();
-      res.json({ 
-        message: 'Checkout successful', 
-        roomNumbers: booking.selectedRooms.map(r => r.roomNumber) 
-      });
-    } catch (transactionError) {
-      await session.abortTransaction();
-      throw transactionError;
-    } finally {
-      session.endSession();
-    }
-  } catch (error) {
-    res.status(400).json({ message: error.message });
   }
 });
 
