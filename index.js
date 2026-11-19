@@ -107,16 +107,11 @@ async function verifyEmailConnection() {
 verifyEmailConnection();
 
 // Multer setup for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'public/uploads/');
-  },
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  }
+// Vercel's filesystem is read-only, so keep uploads in memory and store them in MongoDB.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024 } // Vercel rejects request bodies over ~4.5MB
 });
-
-const upload = multer({ storage });
 
 // Room Schema - Removed images field since we're using hardcoded paths
 const roomSchema = new mongoose.Schema({
@@ -149,7 +144,7 @@ const bookingSchema = new mongoose.Schema({
   totalAmount: { type: Number, required: true },
   paymentStatus: { type: String, enum: ['Pending', 'Completed'], default: 'Pending' },
   paymentMethod: { type: String, enum: ['online', 'cash'], default: 'online' },
-  paymentProof: { type: String },
+  paymentProof: { type: String, select: false }, // base64 data URL; excluded from list queries
   specialRequests: { type: String },
   bookingDate: { type: Date, default: Date.now },
   bookingStatus: { type: String, enum: ['Confirmed', 'Cancelled', 'Completed'], default: 'Confirmed' }
@@ -342,6 +337,13 @@ async function sendBookingEmails(booking) {
       `
     };
 
+    if (booking.paymentProof) {
+      adminMail.attachments = [{
+        filename: `payment-proof-${booking._id.toString().slice(-6)}`,
+        path: booking.paymentProof
+      }];
+    }
+
     await emailTransporter.sendMail(adminMail);
     console.log(`Sent notification to admin: ${process.env.ADMIN_EMAIL}`);
 
@@ -508,7 +510,9 @@ app.post('/api/bookings', upload.single('paymentProof'), async (req, res) => {
       totalAmount,
       paymentMethod: formData.paymentMethod,
       paymentStatus: formData.paymentMethod === 'cash' ? 'Pending' : 'Pending',
-      paymentProof: req.file ? `/uploads/${req.file.filename}` : undefined,
+      paymentProof: req.file
+        ? `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
+        : undefined,
       specialRequests: formData.specialRequests || undefined
     });
 
@@ -601,6 +605,12 @@ app.put('/api/bookings/:id/checkout', async (req, res) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
+  if (err instanceof multer.MulterError) {
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? 'Payment screenshot is too large. Please upload an image under 4MB.'
+      : `Upload error: ${err.message}`;
+    return res.status(400).json({ message });
+  }
   res.status(500).json({ message: 'Something went wrong!' });
 });
 
